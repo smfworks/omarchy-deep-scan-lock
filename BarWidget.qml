@@ -11,7 +11,7 @@ BarWidget {
 
   property string mode: "demo"
   property bool armed: false
-  property string chipText: "SCAN"
+  property string chipText: "DEMO"
 
   implicitWidth: button.implicitWidth
   implicitHeight: button.implicitHeight
@@ -48,8 +48,8 @@ BarWidget {
     onLoadFailed: {
       root.armed = false
       root.mode = "demo"
-      root.chipText = "SCAN"
-      button.tooltipText = "Deep Scan Lock — preview the cinematic HUD"
+      root.chipText = "DEMO"
+      button.tooltipText = "Deep Scan Lock — cinematic preview, not a security claim"
     }
   }
 
@@ -69,7 +69,7 @@ BarWidget {
     text: root.chipText
     labelVisible: false
     keepSpace: true
-    tooltipText: "Deep Scan Lock — preview the cinematic HUD"
+    tooltipText: "Deep Scan Lock — cinematic preview, not a security claim"
     fixedWidth: vertical ? barSize : Style.space(44)
     fixedHeight: vertical ? Style.space(44) : barSize
     onPressed: function(buttonCode) {

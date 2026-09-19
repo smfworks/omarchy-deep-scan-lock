@@ -126,7 +126,7 @@
         honesty: "DEMO · cinematic preview · not a security claim",
         rec: "cinematic DEMO loop",
         hint: "ESC closes preview · unlock still goes through omarchy.lock / PAM",
-        chip: "SCAN", loop: true
+        chip: "DEMO", loop: true
       },
       armed: {
         mode: "ARMED", tone: "#F5A524", status: "ARMED",
@@ -137,7 +137,7 @@
       },
       live: {
         mode: "LIVE", tone: "#3DDC97", status: "SECURE",
-        honesty: "LIVE · omarchy.lock reports locked · HUD is not PAM",
+        honesty: "LIVE · omarchy.lock sessionLocked/secure · HUD is not PAM",
         rec: "payload from lock-ipc",
         hint: "Unlock on the Omarchy lock screen · this HUD does not accept a password",
         chip: "LIVE", loop: false
@@ -161,7 +161,7 @@
         honesty: "DEMO · cinematic preview · not a security claim",
         rec: "lock IPC reports not locked",
         hint: "UNLOCKED · lock IPC reports not locked · not a security claim",
-        chip: "SCAN", loop: false
+        chip: "DEMO", loop: false
       }
     };
 
