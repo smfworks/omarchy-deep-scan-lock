@@ -1,0 +1,3 @@
+# omarchy-deep-scan-lock
+
+Scaffolding Deep Scan Lock for Omarchy Quattro…
