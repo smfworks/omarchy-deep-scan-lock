@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Deep Scan Lock — HUD preview</title>
+  <style>
+    :root {
+      --fg: #e8eefc;
+      --accent: #7dd3fc;
+      --live: #3DDC97;
+      --armed: #F5A524;
+      --err: #FF4D6D;
+      --stale: #C9A227;
+      --muted: #8B93A7;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; background: #04070d; color: var(--fg); font-family: ui-sans-serif, "Segoe UI", sans-serif; }
+    body { display: grid; grid-template-rows: auto 1fr; }
+    body.hud { grid-template-rows: 1fr; }
+    body.hud .toolbar { display: none; }
+    .toolbar {
+      display: flex; gap: 10px; flex-wrap: wrap; align-items: center;
+      padding: 12px 16px; background: #0b1220; border-bottom: 1px solid #1c2740;
+      font-size: 13px; z-index: 4;
+    }
+    button, .chip {
+      border: 1px solid #2a3a58; background: #121a2c; color: var(--fg);
+      border-radius: 999px; padding: 6px 12px; cursor: pointer;
+    }
+    button.active { border-color: var(--accent); color: var(--accent); }
+    .stage {
+      position: relative; overflow: hidden;
+      display: flex; flex-direction: column; align-items: center;
+      justify-content: space-between;
+      padding: 22px 16px 18px;
+      background:
+        radial-gradient(ellipse at 50% 48%, rgba(34, 70, 110, 0.45) 0%, transparent 48%),
+        radial-gradient(ellipse at 50% 38%, #12203a 0%, #070b14 58%, #04070d 100%);
+    }
+    .stage::after {
+      content: "";
+      pointer-events: none;
+      position: absolute; inset: 0;
+      background: repeating-linear-gradient(
+        to bottom,
+        rgba(125, 211, 252, 0.035) 0 1px,
+        transparent 1px 3px
+      );
+      mix-blend-mode: screen;
+      box-shadow: inset 0 0 180px rgba(0, 0, 0, 0.72);
+    }
+    canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+    .honesty {
+      position: relative;
+      display: flex; gap: 10px; align-items: center;
+      background: rgba(12, 18, 32, 0.86);
+      border: 1px solid rgba(125, 211, 252, 0.55);
+      border-radius: 999px; padding: 8px 16px; font-size: 13px;
+      max-width: min(920px, 92vw); z-index: 3;
+    }
+    .honesty .mode {
+      border-radius: 999px; padding: 2px 10px; font-weight: 700; letter-spacing: 0.08em;
+      border: 1px solid; flex: 0 0 auto;
+    }
+    .core {
+      position: relative;
+      width: min(720px, 72vw); text-align: center; z-index: 2;
+    }
+    .brand { color: var(--accent); letter-spacing: 0.18em; font-size: 12px; font-weight: 700; }
+    .clock {
+      margin: 8px 0 4px;
+      font-size: clamp(56px, 9vw, 96px);
+      font-weight: 750;
+      letter-spacing: 0.02em;
+      text-shadow: 0 0 28px rgba(125, 211, 252, 0.45), 0 0 64px rgba(125, 211, 252, 0.18);
+    }
+    .meta { opacity: 0.55; margin: 0 0 16px; letter-spacing: 0.06em; }
+    .status {
+      display: inline-block;
+      border-radius: 999px; padding: 8px 22px;
+      border: 1px solid; letter-spacing: 0.16em; font-weight: 700;
+      background: rgba(10, 16, 30, 0.72);
+    }
+    .rec { margin-top: 14px; font-size: 12px; letter-spacing: 0.08em; opacity: 0.55; }
+    .bar-wrap {
+      margin: 16px auto 0; width: min(380px, 55%); height: 8px;
+      border-radius: 999px; background: rgba(12, 18, 32, 0.7);
+      border: 1px solid rgba(125, 211, 252, 0.28); overflow: hidden;
+    }
+    .bar-wrap .fill { height: 100%; width: 0; background: var(--accent); box-shadow: 0 0 16px var(--accent); }
+    .loop-note { margin-top: 8px; font-size: 12px; letter-spacing: 0.16em; color: var(--accent); opacity: 0.7; }
+    .footer { position: relative; z-index: 3; opacity: 0.55; font-size: 13px; letter-spacing: 0.04em; text-align: center; max-width: 80%; }
+    .corners { position: absolute; inset: 18px; pointer-events: none; z-index: 2; }
+    .corners span { position: absolute; width: 28px; height: 28px; border: 1.5px solid rgba(125,211,252,0.45); }
+    .corners .tl { top: 0; left: 0; border-right: 0; border-bottom: 0; }
+    .corners .tr { top: 0; right: 0; border-left: 0; border-bottom: 0; }
+    .corners .bl { bottom: 0; left: 0; border-right: 0; border-top: 0; }
+    .corners .br { bottom: 0; right: 0; border-left: 0; border-top: 0; }
+  </style>
+</head>
+<body>
+  <div class="toolbar">
+    <strong>Deep Scan Lock preview</strong>
+    <button data-scene="demo" class="active">DEMO</button>
+    <button data-scene="armed">ARMED</button>
+    <button data-scene="live">LIVE</button>
+    <button data-scene="err">ERR</button>
+    <button data-scene="stale">STALE</button>
+    <button data-scene="unlocked">UNLOCKED</button>
+    <span id="chip">chip SCAN</span>
+  </div>
+  <div class="stage" id="stage">
+    <canvas id="field"></canvas>
+    <div class="corners" aria-hidden="true">
+      <span class="tl"></span><span class="tr"></span><span class="bl"></span><span class="br"></span>
+    </div>
+    <div class="honesty" id="honesty"></div>
+    <div class="core" id="core"></div>
+    <div class="footer" id="footer"></div>
+  </div>
+  <script>
+    const scenes = {
+      demo: {
+        mode: "DEMO", tone: "#7DD3FC", status: "SCANNING",
+        honesty: "DEMO · cinematic preview · not a security claim",
+        rec: "cinematic DEMO loop",
+        hint: "ESC closes preview · unlock still goes through omarchy.lock / PAM",
+        chip: "SCAN", loop: true
+      },
+      armed: {
+        mode: "ARMED", tone: "#F5A524", status: "ARMED",
+        honesty: "ARMED · waiting for omarchy.lock · visual companion only",
+        rec: "companion armed · no lock reported",
+        hint: "ESC closes this companion · lock the session with omarchy.lock",
+        chip: "ARM", loop: false
+      },
+      live: {
+        mode: "LIVE", tone: "#3DDC97", status: "SECURE",
+        honesty: "LIVE · omarchy.lock reports locked · HUD is not PAM",
+        rec: "payload from lock-ipc",
+        hint: "Unlock on the Omarchy lock screen · this HUD does not accept a password",
+        chip: "LIVE", loop: false
+      },
+      err: {
+        mode: "ERR", tone: "#FF4D6D", status: "ERR",
+        honesty: "ERR · lock IPC failed · not claiming locked or unlocked",
+        rec: "no lock signal",
+        hint: "ESC closes · lock IPC unreachable · HUD cannot see session state",
+        chip: "ERR", loop: false
+      },
+      stale: {
+        mode: "STALE", tone: "#C9A227", status: "STALE",
+        honesty: "STALE · last lock IPC snapshot · not a live claim",
+        rec: "last-good lock snapshot",
+        hint: "ESC closes · showing last snapshot · probe again before trusting it",
+        chip: "STALE", loop: false
+      },
+      unlocked: {
+        mode: "DEMO", tone: "#7DD3FC", status: "UNLOCKED",
+        honesty: "DEMO · cinematic preview · not a security claim",
+        rec: "lock IPC reports not locked",
+        hint: "UNLOCKED · lock IPC reports not locked · not a security claim",
+        chip: "SCAN", loop: false
+      }
+    };
+
+    const params = new URLSearchParams(location.search);
+    if (params.get("hud") === "1") document.body.classList.add("hud");
+    let current = params.get("scene") || "demo";
+    let progress = 0;
+    let sweep = 0;
+
+    function pad(n) { return String(n).padStart(2, "0"); }
+    function clockNow() {
+      const d = new Date();
+      return {
+        time: pad(d.getHours()) + ":" + pad(d.getMinutes()) + ":" + pad(d.getSeconds()),
+        date: d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate())
+      };
+    }
+
+    function render(name) {
+      current = name;
+      const g = scenes[name] || scenes.demo;
+      document.querySelectorAll(".toolbar button[data-scene]").forEach((b) => {
+        b.classList.toggle("active", b.dataset.scene === name);
+      });
+      document.getElementById("honesty").style.borderColor = g.tone + "99";
+      document.getElementById("honesty").innerHTML =
+        `<span class="mode" style="color:${g.tone};border-color:${g.tone}">${g.mode}</span> ${g.honesty}`;
+      const t = clockNow();
+      document.getElementById("core").innerHTML =
+        `<div class="brand">DEEP SCAN LOCK</div>` +
+        `<div class="clock">${t.time}</div>` +
+        `<p class="meta">${t.date}  ·  preview.host</p>` +
+        `<div class="status" style="color:${g.tone};border-color:${g.tone}">${g.status}</div>` +
+        `<div class="rec">${g.rec}</div>` +
+        (g.loop
+          ? `<div class="bar-wrap"><div class="fill" id="fill"></div></div><div class="loop-note">DEMO LOOP · not a real scan</div>`
+          : "");
+      document.getElementById("footer").textContent = g.hint;
+      document.getElementById("chip").textContent = "chip " + g.chip;
+      paint();
+    }
+
+    function paint() {
+      const canvas = document.getElementById("field");
+      const rect = canvas.parentElement.getBoundingClientRect();
+      const dpr = devicePixelRatio || 1;
+      canvas.width = rect.width * dpr;
+      canvas.height = rect.height * dpr;
+      const ctx = canvas.getContext("2d");
+      const w = canvas.width, h = canvas.height, cx = w * 0.5, cy = h * 0.48;
+      const maxR = Math.min(w, h) * 0.4;
+      const g = scenes[current] || scenes.demo;
+      ctx.clearRect(0, 0, w, h);
+
+      const drift = (sweep * 28) % 22;
+      ctx.strokeStyle = "rgba(125,211,252,0.14)";
+      ctx.lineWidth = 1;
+      for (let i = 0; i < 36; i++) {
+        ctx.beginPath();
+        ctx.moveTo(0, i * 22 + drift);
+        ctx.lineTo(w, i * 22 - 16 + drift);
+        ctx.stroke();
+      }
+
+      const hexR = Math.max(28, Math.min(w, h) * 0.048);
+      ctx.strokeStyle = "rgba(125,211,252,0.16)";
+      for (let row = -2; row < 20; row++) {
+        for (let col = -2; col < 26; col++) {
+          const hx = col * hexR * 1.72 + (row % 2 ? hexR * 0.86 : 0);
+          const hy = row * hexR * 1.5;
+          ctx.beginPath();
+          for (let i = 0; i < 6; i++) {
+            const a = Math.PI / 6 + i * Math.PI / 3;
+            const x = hx + hexR * 0.9 * Math.cos(a);
+            const y = hy + hexR * 0.9 * Math.sin(a);
+            i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+          }
+          ctx.closePath();
+          ctx.stroke();
+        }
+      }
+
+      ctx.beginPath();
+      ctx.moveTo(cx, cy);
+      ctx.fillStyle = g.tone + "33";
+      ctx.arc(cx, cy, maxR, sweep - 0.42, sweep + 0.04);
+      ctx.closePath();
+      ctx.fill();
+      ctx.beginPath();
+      ctx.strokeStyle = g.tone;
+      ctx.globalAlpha = g.loop ? 0.95 : 0.55;
+      ctx.lineWidth = g.loop ? 3.4 : 2;
+      ctx.moveTo(cx, cy);
+      ctx.lineTo(cx + Math.cos(sweep) * maxR, cy + Math.sin(sweep) * maxR);
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+
+      [0.28, 0.5, 0.72, 0.94].forEach((r, i) => {
+        ctx.beginPath();
+        ctx.strokeStyle = g.tone;
+        ctx.globalAlpha = 0.22 + i * 0.1;
+        ctx.lineWidth = i === 3 ? 2.6 : 1.3;
+        ctx.arc(cx, cy, maxR * r, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+      });
+      for (let i = 0; i < 12; i++) {
+        const a = i * Math.PI / 6;
+        ctx.beginPath();
+        ctx.strokeStyle = g.tone;
+        ctx.globalAlpha = 0.28;
+        ctx.moveTo(cx + Math.cos(a) * maxR * 0.9, cy + Math.sin(a) * maxR * 0.9);
+        ctx.lineTo(cx + Math.cos(a) * maxR * 0.98, cy + Math.sin(a) * maxR * 0.98);
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+      }
+
+      const printCx = w * 0.16, printCy = h * 0.58;
+      ctx.strokeStyle = g.tone;
+      ctx.globalAlpha = 0.55;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.ellipse(printCx, printCy, 52, 78, 0, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+      for (let i = 0; i < 8; i++) {
+        ctx.beginPath();
+        ctx.strokeStyle = "rgba(125,211,252," + (0.28 + i * 0.05) + ")";
+        ctx.lineWidth = 1.6;
+        ctx.ellipse(printCx, printCy + 6, 14 + i * 5.2, 22 + i * 7, 0, Math.PI * 0.22, Math.PI * 1.78);
+        ctx.stroke();
+      }
+      ctx.beginPath();
+      ctx.strokeStyle = g.tone;
+      ctx.globalAlpha = 0.7;
+      ctx.arc(printCx, printCy - 18, 8, 0.4, Math.PI - 0.4);
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+
+      const eyeCx = w * 0.84, eyeCy = h * 0.58;
+      ctx.beginPath();
+      ctx.strokeStyle = g.tone;
+      ctx.globalAlpha = 0.7;
+      ctx.lineWidth = 2;
+      ctx.ellipse(eyeCx, eyeCy, 86, 36, 0, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+      for (let i = 0; i < 4; i++) {
+        ctx.beginPath();
+        ctx.strokeStyle = "rgba(125,211,252," + (0.35 + i * 0.1) + ")";
+        ctx.arc(eyeCx, eyeCy, 28 - i * 6, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+      ctx.beginPath();
+      ctx.fillStyle = g.tone;
+      ctx.globalAlpha = 0.85;
+      ctx.arc(eyeCx, eyeCy, 6, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.globalAlpha = 1;
+      ctx.beginPath();
+      ctx.strokeStyle = "rgba(232,238,252,0.35)";
+      ctx.moveTo(eyeCx - 96, eyeCy);
+      ctx.lineTo(eyeCx + 96, eyeCy);
+      ctx.moveTo(eyeCx, eyeCy - 44);
+      ctx.lineTo(eyeCx, eyeCy + 44);
+      ctx.stroke();
+
+      if (g.loop) {
+        const y = h * (0.12 + progress * 0.76);
+        ctx.fillStyle = g.tone + "33";
+        ctx.fillRect(0, y - 14, w, 28);
+        ctx.fillStyle = g.tone;
+        ctx.fillRect(0, y - 2, w, 3);
+        const fill = document.getElementById("fill");
+        if (fill) fill.style.width = (progress * 100) + "%";
+      }
+    }
+
+    document.querySelectorAll("[data-scene]").forEach((b) => {
+      b.addEventListener("click", () => render(b.dataset.scene));
+    });
+    window.addEventListener("resize", paint);
+    setInterval(() => {
+      sweep += 0.03;
+      if ((scenes[current] || scenes.demo).loop) progress = (progress + 0.008) % 1;
+      const clock = document.querySelector(".clock");
+      if (clock) clock.textContent = clockNow().time;
+      paint();
+    }, 40);
+    render(current);
+  </script>
+</body>
+</html>
