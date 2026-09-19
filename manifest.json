@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "id": "smf.deep-scan-lock",
+  "name": "Deep Scan Lock",
+  "version": "0.1.0",
+  "author": "SMF Works",
+  "license": "MIT",
+  "description": "Sci-fi lock / idle HUD companion for omarchy.lock. Cinematic deep-scan overlay with honest LIVE / ARMED / DEMO labels. Does not replace PAM or accept a password.",
+  "kinds": ["overlay", "bar-widget"],
+  "keepLoaded": true,
+  "entryPoints": {
+    "overlay": "Overlay.qml",
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "Deep Scan Lock",
+    "description": "Arm / preview chip for the deep-scan lock companion HUD.",
+    "category": "Session",
+    "allowMultiple": false,
+    "defaultSection": "right"
+  }
+}
