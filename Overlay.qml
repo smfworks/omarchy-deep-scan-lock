@@ -147,25 +147,25 @@ Item {
     var tone = root.modeTone
     var i
 
-    ctx.strokeStyle = cssColor(root.accent, root.demoLoop ? 0.07 : 0.04)
+    ctx.strokeStyle = cssColor(root.accent, root.demoLoop ? 0.14 : 0.07)
     ctx.lineWidth = 1
-    var drift = root.demoLoop ? (phase * 18) % 28 : 0
-    for (i = 0; i < 22; i++) {
+    var drift = root.demoLoop ? (phase * 18) % 22 : 0
+    for (i = 0; i < 36; i++) {
       ctx.beginPath()
-      ctx.moveTo(0, i * 28 + drift)
-      ctx.lineTo(w, i * 28 - 18 + drift)
+      ctx.moveTo(0, i * 22 + drift)
+      ctx.lineTo(w, i * 22 - 16 + drift)
       ctx.stroke()
     }
 
-    ctx.strokeStyle = cssColor(root.accent, 0.05)
-    var hexR = Math.max(18, Math.min(w, h) * 0.045)
+    ctx.strokeStyle = cssColor(root.accent, 0.14)
+    var hexR = Math.max(22, Math.min(w, h) * 0.048)
     var row
     var col
-    for (row = -2; row < 16; row++) {
-      for (col = -2; col < 22; col++) {
+    for (row = -2; row < 18; row++) {
+      for (col = -2; col < 24; col++) {
         var hx = col * hexR * 1.72 + (row % 2 ? hexR * 0.86 : 0)
         var hy = row * hexR * 1.5
-        var pts = Scan.hexPoints(hx, hy, hexR * 0.92, 0)
+        var pts = Scan.hexPoints(hx, hy, hexR * 0.9, 0)
         ctx.beginPath()
         ctx.moveTo(pts[0].x, pts[0].y)
         for (i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y)
@@ -177,16 +177,16 @@ Item {
     var sweep = phase
     ctx.beginPath()
     ctx.moveTo(cx, cy)
-    ctx.fillStyle = cssColor(tone, root.demoLoop ? 0.1 : 0.04)
-    ctx.arc(cx, cy, maxR * 1.05, sweep - 0.28, sweep + 0.02)
+    ctx.fillStyle = cssColor(tone, root.demoLoop ? 0.2 : 0.08)
+    ctx.arc(cx, cy, maxR * 1.02, sweep - 0.42, sweep + 0.04)
     ctx.closePath()
     ctx.fill()
 
     ctx.beginPath()
-    ctx.strokeStyle = cssColor(tone, root.demoLoop ? 0.85 : 0.35)
-    ctx.lineWidth = root.demoLoop ? 2.2 : 1.2
+    ctx.strokeStyle = cssColor(tone, root.demoLoop ? 0.92 : 0.45)
+    ctx.lineWidth = root.demoLoop ? 2.6 : 1.4
     ctx.moveTo(cx, cy)
-    ctx.lineTo(cx + Math.cos(sweep) * maxR * 1.05, cy + Math.sin(sweep) * maxR * 1.05)
+    ctx.lineTo(cx + Math.cos(sweep) * maxR * 1.02, cy + Math.sin(sweep) * maxR * 1.02)
     ctx.stroke()
 
     function ring(r, alpha, width) {
@@ -196,46 +196,58 @@ Item {
       ctx.arc(cx, cy, r, 0, Math.PI * 2)
       ctx.stroke()
     }
-    ring(maxR * 0.34, 0.18, 1)
-    ring(maxR * 0.58, 0.28, 1.4)
-    ring(maxR * 0.86, root.live ? 0.55 : 0.22, root.live ? 2.4 : 1.4)
+    ring(maxR * 0.28, 0.22, 1)
+    ring(maxR * 0.5, 0.3, 1.3)
+    ring(maxR * 0.72, 0.38, 1.4)
+    ring(maxR * 0.94, root.live ? 0.7 : 0.32, root.live ? 2.6 : 1.6)
 
-    var printCx = w * 0.18
-    var printCy = h * 0.62
-    for (i = 0; i < 6; i++) {
+    for (i = 0; i < 12; i++) {
+      var tick = i * Math.PI / 6
       ctx.beginPath()
-      ctx.strokeStyle = cssColor(root.accent, 0.12 + i * 0.04)
-      ctx.lineWidth = 1.2
-      ctx.ellipse(printCx, printCy, 18 + i * 11, 26 + i * 14, 0, Math.PI * 0.15, Math.PI * 1.85)
+      ctx.strokeStyle = cssColor(tone, 0.28)
+      ctx.moveTo(cx + Math.cos(tick) * maxR * 0.9, cy + Math.sin(tick) * maxR * 0.9)
+      ctx.lineTo(cx + Math.cos(tick) * maxR * 0.98, cy + Math.sin(tick) * maxR * 0.98)
       ctx.stroke()
     }
-    ctx.beginPath()
-    ctx.strokeStyle = cssColor(tone, 0.45)
-    ctx.lineWidth = 1.6
-    ctx.moveTo(printCx, printCy - 62)
-    ctx.lineTo(printCx, printCy + 62)
-    ctx.stroke()
 
-    var eyeCx = w * 0.82
-    var eyeCy = h * 0.62
+    function strokeOval(ox, oy, rx, ry, start, end) {
+      ctx.save()
+      ctx.translate(ox, oy)
+      ctx.scale(1, ry / Math.max(rx, 0.01))
+      ctx.beginPath()
+      ctx.arc(0, 0, rx, start, end)
+      ctx.restore()
+      ctx.stroke()
+    }
+
+    var printCx = w * 0.16
+    var printCy = h * 0.58
+    ctx.strokeStyle = cssColor(tone, 0.55)
+    ctx.lineWidth = 2
+    strokeOval(printCx, printCy, 42, 64, 0, Math.PI * 2)
+    for (i = 0; i < 8; i++) {
+      ctx.strokeStyle = cssColor(root.accent, 0.26 + i * 0.05)
+      ctx.lineWidth = 1.4
+      strokeOval(printCx, printCy + 6, 12 + i * 4.2, 18 + i * 6, Math.PI * 0.22, Math.PI * 1.78)
+    }
+
+    var eyeCx = w * 0.84
+    var eyeCy = h * 0.58
+    ctx.strokeStyle = cssColor(tone, 0.7)
+    ctx.lineWidth = 2
+    strokeOval(eyeCx, eyeCy, 70, 30, 0, Math.PI * 2)
     for (i = 0; i < 4; i++) {
       ctx.beginPath()
-      ctx.strokeStyle = cssColor(root.accent, 0.16 + i * 0.06)
-      ctx.lineWidth = 1.2
-      ctx.ellipse(eyeCx, eyeCy, 52 - i * 9, 22 - i * 3, 0, 0, Math.PI * 2)
+      ctx.strokeStyle = cssColor(root.accent, 0.32 + i * 0.1)
+      ctx.arc(eyeCx, eyeCy, 22 - i * 5, 0, Math.PI * 2)
       ctx.stroke()
     }
     ctx.beginPath()
-    ctx.strokeStyle = cssColor(tone, 0.7)
-    ctx.lineWidth = 1.6
-    ctx.arc(eyeCx, eyeCy, 8, 0, Math.PI * 2)
-    ctx.stroke()
-    ctx.beginPath()
-    ctx.strokeStyle = cssColor(root.foreground, 0.2)
-    ctx.moveTo(eyeCx - 64, eyeCy)
-    ctx.lineTo(eyeCx + 64, eyeCy)
-    ctx.moveTo(eyeCx, eyeCy - 28)
-    ctx.lineTo(eyeCx, eyeCy + 28)
+    ctx.strokeStyle = cssColor(root.foreground, 0.28)
+    ctx.moveTo(eyeCx - 80, eyeCy)
+    ctx.lineTo(eyeCx + 80, eyeCy)
+    ctx.moveTo(eyeCx, eyeCy - 36)
+    ctx.lineTo(eyeCx, eyeCy + 36)
     ctx.stroke()
 
     if (root.demoLoop) {
@@ -367,6 +379,42 @@ Item {
       onPaint: root.paintField(field)
     }
 
+    Item {
+      anchors.fill: parent
+      anchors.margins: Style.space(18)
+      z: 8
+
+      Repeater {
+        model: [
+          { x: 0, y: 0, r: 0 },
+          { x: 1, y: 0, r: 90 },
+          { x: 0, y: 1, r: 270 },
+          { x: 1, y: 1, r: 180 }
+        ]
+        Rectangle {
+          required property var modelData
+          width: Style.space(28)
+          height: Style.space(28)
+          color: "transparent"
+          border.width: 0
+          x: modelData.x === 1 ? parent.width - width : 0
+          y: modelData.y === 1 ? parent.height - height : 0
+          rotation: modelData.r
+
+          Rectangle {
+            width: parent.width
+            height: 2
+            color: Util.alpha(root.accent, 0.45)
+          }
+          Rectangle {
+            width: 2
+            height: parent.height
+            color: Util.alpha(root.accent, 0.45)
+          }
+        }
+      }
+    }
+
     MouseArea {
       anchors.fill: parent
       enabled: Scan.escapeCloses(root.mode, root.probe)
@@ -413,16 +461,16 @@ Item {
           border.width: 1
           border.color: Util.alpha(root.modeTone, 0.75)
 
-          Text {
-            id: chipLabel
-            anchors.centerIn: parent
-            text: root.modeChip
-            color: root.modeTone
-            font.family: root.fontFamily
-            font.pixelSize: Style.font.caption
-            font.bold: true
-            font.letterSpacing: 1.6
-          }
+        Text {
+          id: chipLabel
+          anchors.centerIn: parent
+          text: root.modeChip
+          color: root.modeTone
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.caption
+          font.bold: true
+          font.letterSpacing: 1.1
+        }
         }
 
         Text {
@@ -452,7 +500,7 @@ Item {
         opacity: 0.78
         font.family: root.fontFamily
         font.pixelSize: Style.font.caption
-        font.letterSpacing: 4.2
+        font.letterSpacing: 2.4
         font.bold: true
         horizontalAlignment: Text.AlignHCenter
       }
@@ -495,7 +543,7 @@ Item {
           font.family: root.fontFamily
           font.pixelSize: Style.font.title
           font.bold: true
-          font.letterSpacing: 3.4
+          font.letterSpacing: 2.2
         }
       }
 
