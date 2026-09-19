@@ -13,7 +13,8 @@ This is a **visual companion** to first-party [`omarchy.lock`](https://github.co
 Quattro has no third-party lock-chrome `kind` and no documented lock-screen
 hook. `omarchy.lock` owns the compositor `WlSessionLock` surface and PAM
 (`omarchy-lock-password` / fingerprint). Deep Scan Lock **does not** replace
-that path, accept a password, or unlock the machine.
+that path, accept a password, or unlock the machine. Do not treat the HUD as
+a security control — see [docs/OPPOSITION.md](docs/OPPOSITION.md).
 
 Sibling plugins:
 [Neural Pulse](https://github.com/smfworks/omarchy-neural-pulse),
@@ -68,37 +69,50 @@ Left-click the bar chip to preview / toggle. Right-click to arm or disarm.
 - **Not a lock-chrome hook.** First-party `omarchy.lock` is a `service` using
   Quickshell `WlSessionLock`. Third-party overlays cannot sit on that secure
   surface. When the compositor owns the lock (`sessionLocked` / `secure`),
-  this HUD hides and does not steal keyboard focus.
+  this HUD hides, yields the keyboard, and does not steal keyboard focus.
 
 Use it as **screenshot bait**, a DEMO cinematic, or an ARMED companion you
 bring up **before** `omarchy.lock` takes the session.
 
 ## Honesty
 
-The status chip is labeled so a screenshot is self-describing:
+The status chip is labeled so a screenshot is self-describing. The bar chip
+uses the same words (DEMO / ARM / LIVE / ERR / STALE) — DEMO is never
+**SCAN**.
 
 | Chip | Meaning |
 |------|---------|
 | **DEMO** | Cinematic preview. Looping scan progress. Never a security claim. |
-| **ARMED** | You armed the companion. Lock IPC is reachable and does **not** report locked. Waiting. |
-| **LIVE** | `omarchy-shell lock status` (or `omarchy-hyprland-session-locked`) reports a real lock. |
+| **ARMED** | Companion armed. Lock IPC is reachable. Compositor has **not** taken `sessionLocked` / `secure`. Includes Omarchy `locked` while still requested/pending. |
+| **LIVE** | Lock IPC `sessionLocked` or `secure` is true (Hyprland helper exit 0 counts). |
 | **ERR** | Armed / live probe failed and there is no last-good snapshot. |
-| **STALE** | Armed / live probe failed; showing the last good lock snapshot. |
+| **STALE** | Armed / live probe failed; last-good snapshot only. Not a live claim. Overlay stays hidden if that snapshot was compositor-held. |
 
 Rules:
 
-- The HUD never claims the machine is locked or unlocked unless a real lock /
-  session probe said so.
-- **SECURE** is LIVE-only. DEMO never wears a security stamp.
-- **SCANNING** in DEMO is a labeled loop, not a real scan.
-- **UNLOCKED** appears only after lock IPC transitions from locked → not locked.
-- `{"mode":"live"}` without a confirming probe does **not** become LIVE.
+- **SECURE** only when mode is LIVE **and** lock IPC says the compositor
+  holds the session (`sessionLocked` or `secure`). Omarchy’s `locked` bit
+  alone is `lockRequested \|\| sessionLocked \|\| secure` and is **not**
+  enough.
+- DEMO never wears a security stamp. **SCANNING** is a labeled loop.
+- The HUD never accepts a password. No field, no PAM. Keys yield while
+  lock is in flight or the compositor owns the session.
+- **UNLOCKED** appears only after compositor lock IPC goes held → not held.
+- `{"mode":"live"}` without `sessionLocked`/`secure` does **not** become
+  LIVE (it arms and waits).
+- **ERR** and **STALE** are visible on the overlay and the bar.
+
+Adversarial review: [docs/OPPOSITION.md](docs/OPPOSITION.md).
 
 ## Keys
 
-- `Escape` closes DEMO / ARMED / ERR / STALE (and a pending LIVE companion)
-- On a real compositor lock, this plugin does not fight `omarchy.lock`
+- `Escape` closes DEMO / ARMED / ERR / STALE when the compositor does **not**
+  own the session lock
+- `Escape` does **not** dismiss a real compositor lock and is not swallowed
+  when the HUD must yield
 - Click the dimmed backdrop to dismiss the same way Escape does
+- While `omarchy.lock` is requested, pending, authenticating, or
+  `sessionLocked`/`secure`, the overlay yields Exclusive keyboard focus
 
 ## Probe
 

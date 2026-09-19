@@ -22,6 +22,7 @@ Item {
   property string hostName: Scan.sanitizeHost(Quickshell.env("HOSTNAME") || Quickshell.env("HOST") || "")
   property var scanState: Scan.emptyState()
   property var probe: Scan.emptyProbe()
+  property bool statusProbeOk: false
 
   property color background: Color.menu.background
   property color foreground: Color.menu.text
@@ -41,6 +42,7 @@ Item {
   readonly property bool live: root.mode === "live"
   readonly property bool demoLoop: root.mode === "demo"
   readonly property bool compositorLock: Scan.compositorOwnsLock(root.probe)
+  readonly property bool yieldKeyboard: Scan.shouldYieldKeyboard(root.probe, root.scanState.lastGood)
 
   function open(payloadJson) {
     root.scanState = Scan.resolveOpen(payloadJson, root.scanState, root.probe)
@@ -49,7 +51,8 @@ Item {
     if (root.scanState.overlayVisible) {
       root.opened = true
       field.requestPaint()
-      Qt.callLater(function() { keyCatcher.forceActiveFocus() })
+      if (!root.yieldKeyboard)
+        Qt.callLater(function() { keyCatcher.forceActiveFocus() })
     } else {
       root.opened = false
     }
@@ -61,7 +64,7 @@ Item {
   }
 
   function dismiss() {
-    if (!Scan.escapeCloses(root.mode, root.probe)) return
+    if (!Scan.escapeCloses(root.mode, root.probe, root.scanState.lastGood)) return
     root.close()
     if (root.shell && typeof root.shell.hide === "function")
       root.shell.hide(root.pluginId)
@@ -95,13 +98,27 @@ Item {
   }
 
   function kickProbe() {
+    root.statusProbeOk = false
     if (!lockStatusProc.running) lockStatusProc.running = true
   }
 
-  function applyLockRaw(raw) {
+  function kickHypr() {
+    if (!hyprLockProc.running) hyprLockProc.running = true
+  }
+
+  function kickIsLocked() {
+    if (!isLockedProc.running) isLockedProc.running = true
+  }
+
+  function applyStatusRaw(raw) {
     var nextProbe = Scan.parseLockStatus(raw)
-    if (!nextProbe.ok) nextProbe = Scan.parseIsLocked(raw)
-    root.ingestProbe(nextProbe)
+    if (nextProbe.ok) {
+      root.statusProbeOk = true
+      root.ingestProbe(nextProbe)
+      return true
+    }
+    root.statusProbeOk = false
+    return false
   }
 
   function ingestProbe(nextProbe) {
@@ -271,12 +288,12 @@ Item {
     stdout: StdioCollector {
       id: lockStdout
       waitForEnd: true
-      onStreamFinished: root.applyLockRaw(String(text || ""))
+      onStreamFinished: {
+        if (!root.applyStatusRaw(String(text || ""))) root.kickHypr()
+      }
     }
     onExited: {
-      if (lockStatusProc.exitCode !== 0) {
-        if (!hyprLockProc.running) hyprLockProc.running = true
-      }
+      if (lockStatusProc.exitCode !== 0) root.kickHypr()
     }
   }
 
@@ -285,8 +302,29 @@ Item {
     command: Scan.hyprlandLockArgv()
     running: false
     onExited: {
-      if (lockStatusProc.exitCode === 0) return
-      root.ingestProbe(Scan.parseHyprlandLockExit(hyprLockProc.exitCode))
+      if (root.statusProbeOk) return
+      var parsed = Scan.parseHyprlandLockExit(hyprLockProc.exitCode)
+      if (parsed.ok) root.ingestProbe(parsed)
+      else root.kickIsLocked()
+    }
+  }
+
+  Process {
+    id: isLockedProc
+    command: Scan.isLockedArgv()
+    running: false
+    stdout: StdioCollector {
+      id: isLockedStdout
+      waitForEnd: true
+      onStreamFinished: {
+        var parsed = Scan.parseIsLocked(String(text || ""))
+        if (parsed.ok) root.ingestProbe(parsed)
+      }
+    }
+    onExited: {
+      if (root.statusProbeOk) return
+      if (isLockedProc.exitCode !== 0)
+        root.ingestProbe(Scan.parseIsLocked(""))
     }
   }
 
@@ -355,7 +393,7 @@ Item {
     color: "transparent"
     WlrLayershell.namespace: "smf-deep-scan-lock"
     WlrLayershell.layer: WlrLayer.Overlay
-    WlrLayershell.keyboardFocus: root.compositorLock ? WlrKeyboardFocus.None : WlrKeyboardFocus.Exclusive
+    WlrLayershell.keyboardFocus: root.yieldKeyboard ? WlrKeyboardFocus.None : WlrKeyboardFocus.Exclusive
     exclusionMode: ExclusionMode.Ignore
 
     Rectangle {
@@ -417,20 +455,21 @@ Item {
 
     MouseArea {
       anchors.fill: parent
-      enabled: Scan.escapeCloses(root.mode, root.probe)
+      enabled: Scan.escapeCloses(root.mode, root.probe, root.scanState.lastGood)
       onClicked: root.dismiss()
     }
 
     Item {
       id: keyCatcher
       anchors.fill: parent
-      focus: true
+      focus: !root.yieldKeyboard
 
       Keys.priority: Keys.BeforeItem
       Keys.onPressed: function(event) {
         if (event.key === Qt.Key_Escape) {
-          root.dismiss()
-          event.accepted = true
+          var closes = Scan.escapeCloses(root.mode, root.probe, root.scanState.lastGood)
+          if (closes) root.dismiss()
+          event.accepted = closes
         }
       }
     }

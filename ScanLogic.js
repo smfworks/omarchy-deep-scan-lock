@@ -150,10 +150,9 @@ function parseLockStatus(raw) {
     miss.source = "lock-ipc"
     return miss
   }
-  var locked = boolish(v.locked) || boolish(v.sessionLocked) || boolish(v.secure)
   return {
     ok: true,
-    locked: locked,
+    locked: boolish(v.locked),
     requested: boolish(v.requested),
     pending: boolish(v.pending),
     sessionLocked: boolish(v.sessionLocked),
@@ -271,6 +270,20 @@ function cloneState(state) {
   }
 }
 
+function sessionActuallyLocked(probe) {
+  if (!probe || probe.ok !== true) return false
+  return probe.sessionLocked === true || probe.secure === true
+}
+
+function lockInFlight(probe) {
+  if (!probe) return false
+  return probe.locked === true
+    || probe.requested === true
+    || probe.pending === true
+    || probe.authenticating === true
+    || sessionActuallyLocked(probe)
+}
+
 function resolveMode(opts) {
   opts = opts || {}
   var payload = opts.payload || parsePayload("{}")
@@ -278,28 +291,38 @@ function resolveMode(opts) {
   var lastGood = opts.lastGood || null
   var armed = opts.armed === true
   if (payload.forceDemo || opts.forceDemo === true) return "demo"
-  if (probe.ok && probe.locked) return "live"
+  if (sessionActuallyLocked(probe)) return "live"
   var needsProbe = armed || payload.wantLive === true
   if (needsProbe && !probe.ok && lastGood && lastGood.ok) return "stale"
   if (needsProbe && !probe.ok) return "err"
-  if (armed && probe.ok && !probe.locked) return "armed"
+  if (needsProbe && probe.ok) return "armed"
   return "demo"
 }
 
 function compositorOwnsLock(probe) {
-  if (!probe) return false
-  return probe.sessionLocked === true || probe.secure === true
+  return sessionActuallyLocked(probe)
 }
 
-function shouldShowOverlay(mode, probe) {
+function shouldYieldKeyboard(probe, lastGood) {
+  if (compositorOwnsLock(probe) || compositorOwnsLock(lastGood)) return true
+  if (!probe) return false
+  return probe.authenticating === true
+    || probe.requested === true
+    || probe.pending === true
+    || probe.locked === true
+}
+
+function shouldShowOverlay(mode, probe, lastGood) {
   var m = normalizeMode(mode) || "demo"
-  if (m === "live" && compositorOwnsLock(probe)) return false
+  if (compositorOwnsLock(probe) || compositorOwnsLock(lastGood)) return false
+  if (probe && probe.authenticating === true) return false
   return m === "demo" || m === "armed" || m === "err" || m === "stale" || m === "live"
 }
 
-function escapeCloses(mode, probe) {
+function escapeCloses(mode, probe, lastGood) {
   var m = normalizeMode(mode) || "demo"
-  if (m === "live" && compositorOwnsLock(probe)) return false
+  if (compositorOwnsLock(probe) || compositorOwnsLock(lastGood)) return false
+  if (probe && probe.authenticating === true) return false
   return m === "demo" || m === "armed" || m === "err" || m === "stale" || m === "live"
 }
 
@@ -308,11 +331,12 @@ function applyProbe(state, probe) {
   var incoming = cloneProbe(probe)
   next.probe = incoming
   if (incoming.ok) {
-    if (next.lastLocked === true && incoming.locked === false)
+    var nowLocked = sessionActuallyLocked(incoming)
+    if (next.lastLocked === true && nowLocked === false)
       next.lastTransition = "unlocked"
-    else if (next.lastLocked === false && incoming.locked === true)
+    else if (next.lastLocked === false && nowLocked === true)
       next.lastTransition = "locked"
-    next.lastLocked = incoming.locked
+    next.lastLocked = nowLocked
     next.lastGood = cloneProbe(incoming)
   }
   return next
@@ -322,7 +346,7 @@ function resolveOpen(payloadJson, state, probe) {
   var parsed = parsePayload(payloadJson)
   var next = cloneState(state)
   if (parsed.explicitDisarm) next.armed = false
-  if (parsed.wantArmed) next.armed = true
+  if (parsed.wantArmed || parsed.wantLive) next.armed = true
   if (parsed.forceDemo) next.forceDemo = true
   else if (parsed.wantArmed || parsed.wantLive || parsed.explicitDisarm) next.forceDemo = false
   else if (parsed.empty && !next.armed) next.forceDemo = true
@@ -334,7 +358,7 @@ function resolveOpen(payloadJson, state, probe) {
     lastGood: next.lastGood,
     forceDemo: next.forceDemo
   })
-  next.overlayVisible = shouldShowOverlay(next.mode, next.probe)
+  next.overlayVisible = shouldShowOverlay(next.mode, next.probe, next.lastGood)
   if (next.mode !== "demo") next.scanProgress = 0
   return next
 }
@@ -348,7 +372,7 @@ function ingestProbe(state, probe) {
     lastGood: next.lastGood,
     forceDemo: next.forceDemo
   })
-  next.overlayVisible = shouldShowOverlay(next.mode, next.probe)
+  next.overlayVisible = shouldShowOverlay(next.mode, next.probe, next.lastGood)
   if (next.mode !== "demo") next.scanProgress = 0
   return next
 }
@@ -383,19 +407,22 @@ function modeColor(mode) {
 
 function statusLine(mode, lastTransition, probe) {
   var m = normalizeMode(mode) || "demo"
-  if (m === "live") return "SECURE"
-  if (lastTransition === "unlocked" && probe && probe.ok && probe.locked === false)
+  if (m === "live" && sessionActuallyLocked(probe)) return "SECURE"
+  if (lastTransition === "unlocked" && probe && probe.ok && !sessionActuallyLocked(probe))
     return "UNLOCKED"
   if (m === "err") return "ERR"
   if (m === "stale") return "STALE"
   if (m === "armed") return "ARMED"
+  if (m === "live") return "LIVE"
   return "SCANNING"
 }
 
 function honestyLine(mode, probe) {
   var m = normalizeMode(mode) || "demo"
   if (m === "live")
-    return "LIVE · omarchy.lock reports locked · HUD is not PAM"
+    return "LIVE · omarchy.lock sessionLocked/secure · HUD is not PAM"
+  if (m === "armed" && lockInFlight(probe))
+    return "ARMED · lock requested or pending · compositor not secure · not a SECURE claim"
   if (m === "armed")
     return "ARMED · waiting for omarchy.lock · visual companion only"
   if (m === "stale")
@@ -409,8 +436,10 @@ function unlockHint(mode, lastTransition, probe) {
   var m = normalizeMode(mode) || "demo"
   if (m === "live")
     return "Unlock on the Omarchy lock screen · this HUD does not accept a password"
-  if (lastTransition === "unlocked" && probe && probe.ok && !probe.locked)
+  if (lastTransition === "unlocked" && probe && probe.ok && !sessionActuallyLocked(probe))
     return "UNLOCKED · lock IPC reports not locked · not a security claim"
+  if (m === "armed" && lockInFlight(probe))
+    return "Companion yields keys · omarchy.lock is arming · this HUD does not accept a password"
   if (m === "armed")
     return "ESC closes this companion · lock the session with omarchy.lock"
   if (m === "err")
@@ -437,13 +466,13 @@ function barChip(state) {
   if (mode === "live") {
     return {
       text: "LIVE",
-      tooltip: "Deep Scan Lock — omarchy.lock reports locked"
+      tooltip: "Deep Scan Lock — omarchy.lock sessionLocked/secure (not PAM)"
     }
   }
   if (mode === "armed") {
     return {
       text: "ARM",
-      tooltip: "Deep Scan Lock — armed, waiting for omarchy.lock"
+      tooltip: "Deep Scan Lock — armed, waiting for compositor lock"
     }
   }
   if (mode === "err") {
@@ -459,8 +488,8 @@ function barChip(state) {
     }
   }
   return {
-    text: "SCAN",
-    tooltip: "Deep Scan Lock — preview the cinematic HUD"
+    text: "DEMO",
+    tooltip: "Deep Scan Lock — cinematic preview, not a security claim"
   }
 }
 
@@ -570,13 +599,13 @@ function neverAcceptsPassword(text) {
   return true
 }
 
-function demoCopyIsHonest(mode, copy) {
+function demoCopyIsHonest(mode, copy, probe) {
   var m = normalizeMode(mode) || "demo"
   var s = String(copy || "")
-  if (m === "live") return s.indexOf("SECURE") !== -1
+  var liveSecure = m === "live" && sessionActuallyLocked(probe)
+  if (liveSecure) return s.indexOf("SECURE") !== -1
   if (s.indexOf("YOUR SYSTEM IS SECURE") !== -1) return false
-  if (m !== "live" && s === "SECURE") return false
-  if (m !== "live" && s.indexOf("SECURE") !== -1 && s.indexOf("not") === -1)
-    return false
+  if (s === "SECURE") return false
+  if (s.indexOf("SECURE") !== -1 && s.indexOf("not") === -1) return false
   return neverClaimsSecure(s)
 }

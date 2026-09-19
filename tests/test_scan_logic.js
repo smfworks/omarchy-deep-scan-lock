@@ -110,6 +110,11 @@ assert.strictEqual(
   "UNLOCKED",
   "UNLOCKED only after a detected lock→unlock transition"
 );
+assert.strictEqual(
+  Scan.statusLine("live", "", Scan.parseIsLocked("true")),
+  "LIVE",
+  "isLocked true without sessionLocked/secure must not stamp SECURE"
+);
 
 assert.ok(Scan.honestyLine("demo").indexOf("DEMO") !== -1);
 assert.ok(Scan.honestyLine("demo").indexOf("not a security claim") !== -1);
@@ -118,6 +123,7 @@ assert.ok(Scan.neverClaimsSecure(Scan.honestyLine("armed", unlockedStatus)));
 assert.ok(Scan.neverClaimsSecure(Scan.honestyLine("err")));
 assert.ok(Scan.honestyLine("live", lockedStatus).indexOf("LIVE") !== -1);
 assert.ok(Scan.honestyLine("live", lockedStatus).indexOf("not PAM") !== -1);
+assert.ok(Scan.honestyLine("live", lockedStatus).indexOf("sessionLocked") !== -1);
 
 assert.ok(Scan.unlockHint("demo").indexOf("omarchy.lock") !== -1);
 assert.ok(Scan.unlockHint("live", "", lockedStatus).indexOf("does not accept a password") !== -1);
@@ -136,11 +142,21 @@ assert.strictEqual(
   false,
   "do not fight the compositor lock surface"
 );
+assert.strictEqual(
+  Scan.shouldShowOverlay("stale", Scan.emptyProbe(), lockedStatus),
+  false,
+  "do not climb over a last-good compositor lock"
+);
 assert.strictEqual(Scan.escapeCloses("demo", Scan.emptyProbe()), true);
 assert.strictEqual(Scan.escapeCloses("armed", unlockedStatus), true);
 assert.strictEqual(Scan.escapeCloses("live", lockedStatus), false);
+assert.strictEqual(Scan.escapeCloses("stale", Scan.emptyProbe(), lockedStatus), false);
 assert.strictEqual(Scan.compositorOwnsLock(lockedStatus), true);
 assert.strictEqual(Scan.compositorOwnsLock(unlockedStatus), false);
+assert.strictEqual(Scan.sessionActuallyLocked(lockedStatus), true);
+assert.strictEqual(Scan.sessionActuallyLocked(unlockedStatus), false);
+assert.strictEqual(Scan.shouldYieldKeyboard(lockedStatus), true);
+assert.strictEqual(Scan.shouldYieldKeyboard(unlockedStatus), false);
 
 let state = Scan.emptyState();
 state = Scan.resolveOpen("{}", state, Scan.emptyProbe());
@@ -161,8 +177,9 @@ assert.ok(Scan.neverClaimsSecure(Scan.honestyLine(state.mode)));
 
 state = Scan.emptyState();
 state = Scan.resolveOpen('{"mode":"live"}', state, unlockedStatus);
-assert.strictEqual(state.mode, "demo", "mode:live without a lock probe must not claim LIVE");
+assert.strictEqual(state.mode, "armed", "mode:live without compositor lock arms and waits");
 assert.notStrictEqual(Scan.statusLine(state.mode, "", unlockedStatus), "SECURE");
+assert.ok(Scan.demoCopyIsHonest(state.mode, Scan.statusLine(state.mode, "", unlockedStatus), unlockedStatus));
 
 state = Scan.resolveOpen('{"mode":"live"}', Scan.emptyState(), lockedStatus);
 assert.strictEqual(state.mode, "live");
@@ -183,13 +200,24 @@ const pendingLive = Scan.parseLockStatus(JSON.stringify({
   secure: false
 }));
 state = Scan.ingestProbe(state, pendingLive);
-assert.strictEqual(state.mode, "live");
-assert.strictEqual(state.lastTransition, "locked");
-assert.strictEqual(state.overlayVisible, true, "pending LIVE may still decorate");
+assert.strictEqual(state.mode, "armed", "Omarchy locked+pending is not LIVE");
+assert.strictEqual(state.lastTransition, "", "pending lock is not a compositor lock transition");
+assert.strictEqual(state.overlayVisible, true, "pending companion may still decorate");
+assert.strictEqual(Scan.statusLine(state.mode, "", pendingLive), "ARMED");
+assert.notStrictEqual(Scan.statusLine(state.mode, "", pendingLive), "SECURE");
+assert.ok(Scan.honestyLine(state.mode, pendingLive).indexOf("not a SECURE claim") !== -1);
+assert.ok(Scan.shouldYieldKeyboard(pendingLive), "yield keys while lock is requested/pending");
+assert.strictEqual(Scan.escapeCloses(state.mode, pendingLive), true);
+assert.ok(Scan.demoCopyIsHonest(state.mode, Scan.statusLine(state.mode, "", pendingLive), pendingLive));
+assert.ok(Scan.demoCopyIsHonest(state.mode, Scan.honestyLine(state.mode, pendingLive), pendingLive));
 
 state = Scan.ingestProbe(state, lockedStatus);
 assert.strictEqual(state.mode, "live");
+assert.strictEqual(state.lastTransition, "locked");
 assert.strictEqual(state.overlayVisible, false);
+assert.strictEqual(Scan.statusLine(state.mode, "", lockedStatus), "SECURE");
+assert.strictEqual(Scan.escapeCloses(state.mode, lockedStatus), false);
+assert.ok(Scan.shouldYieldKeyboard(lockedStatus));
 
 state = Scan.ingestProbe(state, unlockedStatus);
 assert.strictEqual(state.lastTransition, "unlocked");
@@ -213,7 +241,8 @@ assert.strictEqual(Scan.statusLine(armedErr.mode), "ERR");
 assert.ok(Scan.honestyLine(armedErr.mode).indexOf("not claiming locked or unlocked") !== -1);
 
 const chipDemo = Scan.barChip({ mode: "demo" });
-assert.strictEqual(chipDemo.text, "SCAN");
+assert.strictEqual(chipDemo.text, "DEMO");
+assert.ok(chipDemo.tooltip.indexOf("not a security claim") !== -1);
 assert.strictEqual(Scan.barChip({ mode: "armed" }).text, "ARM");
 assert.strictEqual(Scan.barChip({ mode: "live" }).text, "LIVE");
 assert.strictEqual(Scan.barChip({ mode: "err" }).text, "ERR");
@@ -255,9 +284,62 @@ assert.ok(hex.every(function(pt) {
 assert.strictEqual(Scan.demoCopyIsHonest("demo", "YOUR SYSTEM IS SECURE"), false);
 assert.strictEqual(Scan.demoCopyIsHonest("demo", "SECURE"), false);
 assert.strictEqual(Scan.demoCopyIsHonest("demo", "SCANNING"), true);
-assert.strictEqual(Scan.demoCopyIsHonest("live", "SECURE"), true);
+assert.strictEqual(Scan.demoCopyIsHonest("live", "SECURE", lockedStatus), true);
+assert.strictEqual(Scan.demoCopyIsHonest("live", "SECURE", Scan.parseIsLocked("true")), false);
+assert.strictEqual(Scan.demoCopyIsHonest("armed", "SECURE", pendingLive), false);
 assert.strictEqual(Scan.neverClaimsSecure("YOUR SYSTEM IS SECURE"), false);
 assert.strictEqual(Scan.neverAcceptsPassword("Enter Password"), false);
+
+const secureOnly = Scan.parseLockStatus(JSON.stringify({
+  locked: false,
+  sessionLocked: false,
+  secure: true
+}));
+assert.strictEqual(secureOnly.locked, false, "do not OR secure into locked");
+assert.strictEqual(Scan.sessionActuallyLocked(secureOnly), true);
+assert.strictEqual(Scan.resolveMode({
+  payload: Scan.parsePayload('{"mode":"armed"}'),
+  armed: true,
+  probe: secureOnly
+}), "live");
+
+const requestedOnly = Scan.parseLockStatus(JSON.stringify({
+  locked: true,
+  requested: true,
+  pending: false,
+  sessionLocked: false,
+  secure: false
+}));
+assert.strictEqual(Scan.sessionActuallyLocked(requestedOnly), false);
+assert.strictEqual(Scan.lockInFlight(requestedOnly), true);
+assert.strictEqual(Scan.resolveMode({
+  payload: Scan.parsePayload('{"mode":"armed"}'),
+  armed: true,
+  probe: requestedOnly
+}), "armed");
+assert.strictEqual(Scan.statusLine("live", "", requestedOnly), "LIVE");
+assert.ok(Scan.shouldYieldKeyboard(requestedOnly));
+
+const isLockedTrue = Scan.parseIsLocked("true");
+assert.strictEqual(isLockedTrue.locked, true);
+assert.strictEqual(isLockedTrue.sessionLocked, false);
+assert.strictEqual(Scan.sessionActuallyLocked(isLockedTrue), false);
+assert.strictEqual(Scan.resolveMode({
+  payload: Scan.parsePayload('{"mode":"armed"}'),
+  armed: true,
+  probe: isLockedTrue
+}), "armed", "isLocked true is not compositor LIVE");
+assert.notStrictEqual(Scan.statusLine("armed", "", isLockedTrue), "SECURE");
+
+const authenticating = Scan.parseLockStatus(JSON.stringify({
+  locked: true,
+  sessionLocked: false,
+  secure: false,
+  authenticating: true
+}));
+assert.strictEqual(Scan.shouldShowOverlay("armed", authenticating), false);
+assert.strictEqual(Scan.escapeCloses("armed", authenticating), false);
+assert.ok(Scan.shouldYieldKeyboard(authenticating));
 
 const overlay = fs.readFileSync(path.join(__dirname, "..", "Overlay.qml"), "utf8");
 assert.ok(overlay.includes("function open(payloadJson)"));
@@ -265,11 +347,18 @@ assert.ok(overlay.includes("function close()"));
 assert.ok(overlay.includes("WlrLayershell.namespace: \"smf-deep-scan-lock\""));
 assert.ok(overlay.includes("Qt.Key_Escape"));
 assert.ok(overlay.includes("WlrKeyboardFocus.None"));
+assert.ok(overlay.includes("shouldYieldKeyboard"));
+assert.ok(overlay.includes("event.accepted = closes"));
+assert.ok(overlay.includes("Scan.isLockedArgv()"));
 assert.ok(overlay.includes("DEMO LOOP"));
 assert.ok(!overlay.includes("omarchy.deep-scan"));
+assert.ok(!overlay.includes("applyLockRaw"));
 assert.ok(Scan.neverAcceptsPassword(overlay));
 assert.ok(Scan.neverClaimsSecure(overlay));
 assert.ok(!/YOUR SYSTEM IS SECURE/i.test(overlay));
+assert.ok(!/TextInput\.Password/.test(overlay));
+assert.ok(!/PamContext/.test(overlay));
+assert.ok(!/submitPassword/.test(overlay));
 
 const bar = fs.readFileSync(path.join(__dirname, "..", "BarWidget.qml"), "utf8");
 assert.ok(bar.includes("moduleName: \"smf.deep-scan-lock\""));
@@ -306,12 +395,30 @@ assert.ok(readme.includes("omarchy-spectra"));
 assert.ok(readme.includes("omarchy-aegis-gate"));
 assert.ok(readme.includes("Escape") || readme.includes("`Escape`"));
 assert.ok(readme.includes("visual companion"));
-assert.ok(Scan.neverClaimsSecure(readme.replace(/LIVE[\s\S]*PAM/g, "")));
+assert.ok(readme.includes("docs/OPPOSITION.md"));
+assert.ok(readme.includes("sessionLocked"));
+assert.ok(readme.includes("SECURE") && readme.includes("LIVE"));
+assert.ok(readme.includes("yield"));
+assert.ok(Scan.neverClaimsSecure(readme.replace(/LIVE[\s\S]*PAM/g, "").replace(/SECURE[\s\S]*enough\./g, "")));
 
 const preview = fs.readFileSync(path.join(__dirname, "..", "preview/index.html"), "utf8");
 assert.ok(preview.includes("DEMO"));
 assert.ok(preview.includes("ARMED"));
 assert.ok(preview.includes("LIVE"));
+assert.ok(preview.includes('chip: "DEMO"'));
+assert.ok(!preview.includes('chip: "SCAN"'));
 assert.ok(!/YOUR SYSTEM IS SECURE/i.test(preview));
+
+const opposition = fs.readFileSync(path.join(__dirname, "..", "docs/OPPOSITION.md"), "utf8");
+assert.ok(opposition.includes("SECURE"));
+assert.ok(opposition.includes("ARMED"));
+assert.ok(opposition.includes("LIVE"));
+assert.ok(/compositor/i.test(opposition));
+assert.ok(/password/i.test(opposition));
+assert.ok(/false positive/i.test(opposition));
+assert.ok(/Escape/i.test(opposition));
+assert.ok(/DEMO/i.test(opposition));
+assert.ok(!fs.lstatSync(path.join(__dirname, "..", "docs/OPPOSITION.md")).isSymbolicLink());
+assert.ok(!fs.lstatSync(path.join(__dirname, "..", "preview/index.html")).isSymbolicLink());
 
 console.log("ok - ScanLogic helpers");
