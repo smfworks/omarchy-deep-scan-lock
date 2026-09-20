@@ -23,6 +23,12 @@ Sibling plugins:
 [Spectra](https://github.com/smfworks/omarchy-spectra),
 [Aegis Gate](https://github.com/smfworks/omarchy-aegis-gate).
 
+## Demo
+
+Deep Scan Lock on Omarchy (mikesai6) — cinematic DEMO / ARMED companion HUD (not a PAM lock screen).
+
+https://github.com/smfworks/omarchy-deep-scan-lock/releases/download/demo/demo.mp4
+
 ## Install
 
 ```sh
